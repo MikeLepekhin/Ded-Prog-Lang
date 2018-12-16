@@ -14,13 +14,6 @@ class SmartFile {
  private:
   FILE* file_{nullptr};
 
-  void release() {
-    if (file_ != nullptr) {
-      fclose(file_);
-    }
-    file_ = nullptr;
-  }
-
  public:
   SmartFile() {}
 
@@ -39,6 +32,13 @@ class SmartFile {
   void setFile(const char* filename, const char* mode = "r") {
     release();
     file_ = fopen(filename, mode);
+  }
+
+  void release() {
+    if (file_ != nullptr) {
+      fclose(file_);
+    }
+    file_ = nullptr;
   }
 
   ~SmartFile() {

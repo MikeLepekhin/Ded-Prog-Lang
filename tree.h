@@ -9,6 +9,10 @@
 #include <cctype>
 #include <cstdlib>
 #include <vector>
+#include <unordered_map>
+#include <string>
+#include <map>
+#include <set>
 
 #include "exception.h"
 #include "stack_allocator.h"
@@ -52,11 +56,26 @@ enum NodeType {
   OPER_MINUS,
   OPER_MUL,
   OPER_DIV,
-  VARIABLE
+  OPER_SQRT,
+  OPER_EXP,
+  OPER_SIN,
+  OPER_COS,
+  OPER_POWER,
+  VARIABLE,
+  SCAN_NODE,
+  PRINT_NODE,
+  FUNC_BODY_NODE,
+  FUNC_NODE,
+  ASSIGN_NODE,
+  V_NODE
 };
 
 bool isOperator(char ch) {
   return ch == '+' || ch == '-' || ch == '*' || ch == '/';
+}
+
+bool isOperNode(NodeType oper_type) {
+  return oper_type > 0 && oper_type <= OPER_POWER;
 }
 
 bool isVariable(char ch) {
@@ -109,21 +128,41 @@ char getOperByNodeType(NodeType node_type) {
   }
 }
 
+struct VariableBlock {
+  std::string var_name;
+  size_t ram_location;
+};
+
+struct FuncBlock {
+  std::string func_name;
+  size_t ram_location;
+  std::map<std::string, size_t> var_shift;
+};
+
 struct Node {
   NodeType type;
   double result{0.0};
-  char var_name{'0'};
-
   Node* left_son{nullptr};
   Node* right_son{nullptr};
+  void* block{nullptr};
+
+  static StackAllocator<VariableBlock> var_allocator_;
+  static StackAllocator<FuncBlock> func_allocator_;
 
   Node(NodeType type): type(type) {}
 
   Node(NodeType type, double result):
     type(type), result(result) {}
 
-  Node(NodeType type, double result, char var_name):
-    type(type), result(result), var_name(var_name) {}
+  Node(NodeType type, const std::string& var_name):
+      type(type) {
+    if (type != VARIABLE) {
+      throw IncorrectArgumentException("only variables should have such constructor",
+                                       __PRETTY_FUNCTION__);
+    }
+    block = var_allocator_.init_alloc(VariableBlock{var_name, 0});
+    LOG("variable node was constructed");
+  }
 
   Node(NodeType type, Node* left_son, Node* right_son):
     type(type), left_son(left_son), right_son(right_son) {
@@ -134,9 +173,46 @@ struct Node {
     }
   }
 
+  Node(NodeType type, Node* left_son):
+    type(type), left_son(left_son) {
+    if (type != SCAN_NODE && type != PRINT_NODE) {
+      throw IncorrectArgumentException("node of such type should have not 1 son",
+                                       __PRETTY_FUNCTION__);
+    }
+  }
+
+  Node(NodeType type, const std::string var_name, Node* expr_node):
+      type(type), left_son(expr_node), right_son(nullptr) {
+    if (type != ASSIGN_NODE && type != V_NODE && type != FUNC_NODE) {
+      throw IncorrectArgumentException("such constructor is only available for ASSIGN nodes"
+                                         " and FUNC nodes");
+    }
+    if (type == ASSIGN_NODE || type == V_NODE) {
+      block = reinterpret_cast<void*>(var_allocator_.init_alloc(VariableBlock{var_name, 0}));
+    } else {
+      block = reinterpret_cast<void*>(func_allocator_.init_alloc(FuncBlock{var_name, 0}));
+    }
+  }
+
   void setSons(Node* L, Node* R) {
     left_son = L;
     right_son = R;
+  }
+
+  std::string getVarName() const {
+    return reinterpret_cast<VariableBlock*>(block)->var_name;
+  }
+
+  std::string getFuncName() const {
+    return reinterpret_cast<FuncBlock*>(block)->func_name;
+  }
+
+  void setRAM(size_t address) const {
+    reinterpret_cast<FuncBlock*>(block)->ram_location = address;
+  }
+
+  size_t getRAM() const {
+    return reinterpret_cast<FuncBlock*>(block)->ram_location;
   }
 
   std::string to_str() const {
@@ -150,7 +226,7 @@ struct Node {
       case OPER_DIV:
         return "/";
       case VARIABLE:
-        return std::string("") + var_name;
+        return getVarName();
       case REAL_NUMBER:
         return std::to_string(result);
       default:
@@ -161,7 +237,7 @@ struct Node {
 
   bool operator==(const Node& another) const {
     return type == another.type && result == another.result
-      && var_name == another.var_name;
+      && getVarName() == another.getVarName();
   }
 };
 
@@ -170,9 +246,17 @@ class Tree {
   Node* root_{nullptr};
   FILE* step_by_step_{nullptr};
   size_t step_num_{0};
+  std::unordered_map<std::string, size_t> func_map_;
   mutable std::string tex_begin_;
   mutable std::string tex_body_;
   mutable std::string tex_end_;
+
+  void printProgramLevel(const std::string& str, size_t level) const {
+    for (size_t char_id = 0; char_id < level; ++char_id) {
+      std::cout << '-';
+    }
+    std::cout << str << '\n';
+  }
 
   double parseDouble(const std::string& str, size_t* pos) {
     size_t cur_pos = *pos;
@@ -275,7 +359,7 @@ class Tree {
 
     switch (cur_node->type) {
       case VARIABLE:
-        std::cout << cur_node->var_name << ' ';
+        std::cout << cur_node->getVarName() << ' ';
         break;
       case REAL_NUMBER:
         std::cout << cur_node->result << ' ';
@@ -327,7 +411,7 @@ class Tree {
       return nullptr;
     }
 
-    Node* result = allocator_.init_alloc(Node(node->type, node->result, node->var_name));
+    Node* result = allocator_.init_alloc(*node);
     Tree left_tree = recCopy(node->left_son);
     Tree right_tree = recCopy(node->right_son);
     result->setSons(left_tree.root_, right_tree.root_);
@@ -367,14 +451,14 @@ class Tree {
       return Tree(node);
     }
 
-    if (node->type == REAL_NUMBER || (node->type == VARIABLE && node->var_name != variable)) {
+    if (node->type == REAL_NUMBER || (node->type == VARIABLE && node->getVarName()[0] != variable)) {
       PRINT_STEP_NUM();
       PRINTLN_STEP("В это трудно поверить, но\n");
       PRINT_STEP(node->to_str());
       PRINTLN_STEP("'=0\n");
 
       return Tree(allocator_.init_alloc(Node(REAL_NUMBER, 0.0)));
-    } else if (node->type == VARIABLE && node->var_name == variable) {
+    } else if (node->type == VARIABLE && node->getVarName()[0] == variable) {
       PRINT_STEP_NUM();
       PRINTLN_STEP("Если бы вы знали, что такое дифференцирование, то сами могли бы получить, что\n");
       PRINT_STEP(node->to_str());
@@ -477,6 +561,121 @@ class Tree {
     return Tree(allocator_.init_alloc(Node(oper_type, left_son.root_, right_son.root_)));
   }
 
+  void fillVarMapsRec(Node* node, std::map<std::string, size_t>* var_map = nullptr) {
+    try {
+      if (node == nullptr) {
+        return;
+      }
+      if (node->type == FUNC_NODE) {
+        var_map = &reinterpret_cast<FuncBlock *>(node->block)->var_shift;
+      } else if (node->type == VARIABLE || node->type == ASSIGN_NODE) {
+        if (var_map == nullptr || var_map->find(node->getVarName()) == var_map->end()) {
+          throw UndefinedVariableException("undefined variable: " + node->getVarName(),
+                                           __PRETTY_FUNCTION__);
+        }
+        node->setRAM((*var_map)[node->getVarName()]);
+        /*std::cout << std::string("[") + std::to_string((*var_map)[node->getVarName()])
+          + "]=" + node->getVarName() << '\n';*/
+      } else if (node->type == V_NODE) {
+        if (var_map->find(node->getVarName()) != var_map->end()) {
+          throw RedefinedVariableException("redefinition of variable: " + node->getVarName(),
+                                           __PRETTY_FUNCTION__);
+        }
+        node->setRAM(var_map->size());
+        (*var_map)[node->getVarName()] = var_map->size();
+        //std::cout << "add variable " << node->getVarName() << "\n";
+      }
+
+      fillVarMapsRec(node->left_son, var_map);
+      fillVarMapsRec(node->right_son, var_map);
+      if (node->type == FUNC_NODE) {
+        std::cout << "variables of function " + node->getFuncName() + ":\n";
+        for (const std::pair<std::string, size_t> &func_var: *var_map) {
+          std::cout << func_var.first << ' ' << func_var.second << '\n';
+        }
+        std::cout << "\n";
+      }
+    } catch (InterpreterException& exc) {
+      throw exc;
+    }
+  }
+
+  void translateRec(Node* node, FILE* asm_result) {
+    if (node == nullptr) {
+      return;
+    }
+    if (node->type == REAL_NUMBER) {
+      fprintf(asm_result, "  push %lf\n", node->result);
+    } else if (isOperNode(node->type)) {
+      translateRec(node->left_son, asm_result);
+      translateRec(node->right_son, asm_result);
+
+      switch (node->type) {
+        case OPER_PLUS:
+          fprintf(asm_result, "  add\n");
+          break;
+        case OPER_MINUS:
+          fprintf(asm_result, "  sub\n");
+          break;
+        case OPER_MUL:
+          fprintf(asm_result, "  mul\n");
+          break;
+        case OPER_DIV:
+          fprintf(asm_result, "  div\n");
+          break;
+        case OPER_SQRT:
+          fprintf(asm_result, "  sqrt\n");
+          break;
+        case OPER_EXP:
+          fprintf(asm_result, "  exp\n");
+          break;
+        case OPER_SIN:
+          fprintf(asm_result, "  sin\n");
+          break;
+        case OPER_COS:
+          fprintf(asm_result, "  cos\n");
+          break;
+        case OPER_POWER:
+          fprintf(asm_result, "  power\n");
+          break;
+        default:
+          break;
+      }
+      return;
+    } else if (node->type == FUNC_NODE) {
+      fprintf(asm_result, "\n:func_%s\n", node->getFuncName().c_str());
+      translateRec(node->left_son, asm_result);
+      if (node->getFuncName() == "main") {
+        fprintf(asm_result, "  end\n");
+      } else {
+        fprintf(asm_result, "  ret\n");
+      }
+    } else if (node->type == V_NODE || node->type == ASSIGN_NODE) {
+      if (node->left_son != nullptr) {
+        translateRec(node->left_son, asm_result);
+        fprintf(asm_result, "  pop [rcx+%zu]\n", node->getRAM());
+      } else {
+        fprintf(asm_result, "  push 0\n");
+        fprintf(asm_result, "  pop [rcx+%zu]\n", node->getRAM());
+      }
+    } else if (node->type == VARIABLE) {
+      fprintf(asm_result, "  push [rcx+%zu]\n", node->getRAM());
+    } else if (node->type == FUNC_BODY_NODE) {
+      translateRec(node->left_son, asm_result);
+      translateRec(node->right_son, asm_result);
+    } else if (node->type == SCAN_NODE) {
+      fprintf(asm_result, "  in rax\n");
+      fprintf(asm_result, "  push rax\n");
+      fprintf(asm_result, "  pop [rcx+%zu]\n", node->left_son->getRAM());
+    } else if (node->type == PRINT_NODE) {
+      translateRec(node->left_son, asm_result);
+      fprintf(asm_result, "  pop rbx\n");
+      fprintf(asm_result, "  out rbx\n");
+    } else {
+      throw IncorrectParsingException("dsdsdasd", __PRETTY_FUNCTION__);
+    }
+  }
+
  public:
   static StackAllocator<Node> allocator_;
 
@@ -502,7 +701,7 @@ class Tree {
 
         operands.push_back(allocator_.init_alloc(Node(REAL_NUMBER, value)));
       } else if (isVariable(cur_ch)) {
-        operands.push_back(allocator_.init_alloc(Node(VARIABLE, 1, cur_ch)));
+        operands.push_back(allocator_.init_alloc(Node(VARIABLE, std::string("") + cur_ch)));
       } else {
         throw IncorrectArgumentException(std::string("incorrect operator or variable: ") + cur_ch,
                                          __PRETTY_FUNCTION__);
@@ -598,50 +797,67 @@ class Tree {
     return applyOper(another, OPER_DIV);
   }
 
-  int numerateNode(Node* node, size_t* node_index,
-                   std::vector<std::pair<int, int>>* edge_list, std::vector<std::string>* labels) {
+  void printProgramRec(Node* node, size_t level) const {
     if (node == nullptr) {
-      return -1;
+      return;
     }
-    int left_id = numerateNode(node->left_son, node_index, edge_list, labels);
-    int right_id = numerateNode(node->right_son, node_index, edge_list, labels);
-    int cur_id = (*node_index)++;
 
-    labels->push_back(node->to_str());
-
-    if (left_id != -1) {
-      edge_list->push_back({cur_id, left_id});
+    switch (node->type) {
+      case FUNC_NODE:
+        printProgramLevel("func " + node->getFuncName(), level);
+        break;
+      case V_NODE:
+        printProgramLevel("var " + node->getVarName(), level);
+        break;
+      case ASSIGN_NODE:
+        printProgramLevel(node->getVarName() + "=", level);
+        break;
+      case OPER_PLUS:
+        printProgramLevel("+", level);
+        break;
+      case OPER_MINUS:
+        printProgramLevel("-", level);
+        break;
+      case OPER_MUL:
+        printProgramLevel("*", level);
+        break;
+      case OPER_DIV:
+        printProgramLevel("/", level);
+        break;
+      case FUNC_BODY_NODE:
+        //printProgramLevel("", level);
+        break;
+      case VARIABLE:
+        printProgramLevel(node->getVarName(), level);
+        break;
+      case SCAN_NODE:
+        printProgramLevel("scan(" + node->left_son->getVarName() + ")", level);
+        break;
+      case PRINT_NODE:
+        printProgramLevel("print:", level);
+        break;
+      case REAL_NUMBER:
+        printProgramLevel(std::to_string(node->result), level);
+        break;
+      default:
+        throw IncorrectArgumentException("no such node type: " + std::to_string(node->type));
     }
-    if (right_id != -1) {
-      edge_list->push_back({cur_id, right_id});
+    if (node->type == SCAN_NODE) {
+      return;
     }
-    return cur_id;
+    printProgramRec(node->left_son, level + (node->type != FUNC_BODY_NODE));
+    printProgramRec(node->right_son, level + (node->type != FUNC_BODY_NODE));
   }
 
-  void drawNodes(const std::vector<std::string>& label_list, FILE* dot_file) {
-    fprintf(dot_file, "    node [style=filled];\n");
-    for (size_t node_id = 0; node_id < label_list.size(); ++node_id) {
-      fprintf(dot_file, "    node%zu  [label=", node_id);
-      fprintf(dot_file, "    %c%s%c];", static_cast<char>(34), label_list[node_id].c_str(), static_cast<char>(34));
-    }
+  void printProgram() const {
+    std::cout << "program tree:\n";
+    printProgramRec(root_, 0);
   }
 
-  void drawEdges(const std::vector<std::pair<int, int>>& edge_list, FILE* dot_file) {
-    for (std::pair<int, int> cur_edge: edge_list) {
-      fprintf(dot_file, "    node%d  -> node%d;", cur_edge.first, cur_edge.second);
-    }
-  }
-
-  void draw(FILE* dot_file) {
-    std::vector<std::pair<int, int>> edge_list;
-    std::vector<std::string> label_list;
-    size_t node_index = 0;
-
-    numerateNode(root_, &node_index, &edge_list, &label_list);
-    fprintf(dot_file, "digraph G {\n");
-    drawNodes(label_list, dot_file);
-    drawEdges(edge_list, dot_file);
-    fprintf(dot_file, "}");
+  void translateToAsm(FILE* asm_result) {
+    fillVarMapsRec(root_);
+    fprintf(asm_result, "jmp func_main\n");
+    translateRec(root_, asm_result);
   }
 };
 

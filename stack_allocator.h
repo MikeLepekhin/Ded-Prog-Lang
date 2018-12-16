@@ -7,6 +7,9 @@
 
 #include <iostream>
 #include <stack>
+#include <memory>
+
+#include "exception.h"
 
 template <class T >
 class StackAllocator {
@@ -16,21 +19,15 @@ class StackAllocator {
  public:
 
   T* allocate(size_t item_cnt = 1) {
-    return static_cast<T*>(operator new(item_cnt * sizeof(T)));
+    return new T();
   }
 
   T* init_alloc(const T& obj) {
-    T* raw_memory = allocate(1);
-
-    *raw_memory = obj;
-    return raw_memory;
+    return new T(obj);
   }
 
   T* init_alloc(T&& obj) {
-    T* raw_memory = allocate(1);
-
-    *raw_memory = std::move(obj);
-    return raw_memory;
+    return new T(std::move(obj));
   }
 
   void deallocate(T* address, size_t item_cnt) {

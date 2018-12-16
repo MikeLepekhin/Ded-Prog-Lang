@@ -1,0 +1,15 @@
+G := {E | Scan | Print | A | V | \0};
+E := T{[+, -]T}*
+T := P{[*, /]P}*
+P := (E) | N | Id
+Id := [a-z, A-Z]+[a-z, A-Z, _, 0-9]*
+A := Id=E
+Int := int Id[=E]
+Float := float Id[=E]
+Var := var Id[=E]
+V := Int | Float | Var
+Scan := scan(Id)
+Print := print(E)
+FuncBody := [G]*
+Prog := Main
+Main := {main()\n}{lol\n}FuncBody{kek}
