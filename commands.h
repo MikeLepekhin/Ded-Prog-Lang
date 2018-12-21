@@ -125,3 +125,8 @@ COMMAND(18, "ret", 0, 0,\
   INC_INSTR();\
   return;\
 )
+COMMAND(19, "sin", 0, 0,\
+  POP(arg_a);\
+  double sin_value = sin(arg_a);\
+  PUSH_ITEM(sin_value);\
+)
