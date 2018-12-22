@@ -53,18 +53,27 @@ class Parser {
         return nullptr;
       }
 
-      while (compareToken("+") || compareToken("-") || compareToken("||")) {
+      while (compareToken("+") || compareToken("-") || compareToken("||") || compareToken("/") ||
+             compareToken("==") || compareToken("!=") || compareToken("<=") || compareToken(">=") ||
+             compareToken("<") || compareToken(">")) {
+
         std::string oper = tokens_[token_ptr_].value;
         ++token_ptr_;
-        Node *next_T = getT(func_id);
 
-        if (next_T == nullptr) {
+        Node* next_operand = nullptr;
+
+        if (oper == "||") {
+          next_operand = getE(func_id);
+        } else {
+          next_operand = getT(func_id);
+        }
+
+        if (next_operand == nullptr) {
           throw IncorrectParsingException("after operator + or - should be an operand",
                                           __PRETTY_FUNCTION__);
         }
 
-        std::vector<Node*> child_list{cur_node, next_T};
-        cur_node = allocator_.init_alloc(Node(OPERATOR, getOperTypeByOper(oper), child_list));
+        cur_node = allocator_.init_alloc(Node(OPERATOR, getOperTypeByOper(oper), {cur_node, next_operand}));
       }
 
       return cur_node;
@@ -82,18 +91,22 @@ class Parser {
         return nullptr;
       }
 
-      while (compareToken("*") || compareToken("/") || compareToken("==") || compareToken("!=") ||
-            compareToken("<=") || compareToken(">=") || compareToken("<") || compareToken(">")) {
+      while (compareToken("*") || compareToken("/") || compareToken("&&")) {
         std::string oper = tokens_[token_ptr_].value;
         ++token_ptr_;
-        Node *next_P = getP(func_id);
+        Node* next_operand = nullptr;
 
-        if (next_P == nullptr) {
+        if (oper == "||") {
+          next_operand = getE(func_id);
+        } else {
+          next_operand = getP(func_id);
+        }
+
+        if (next_operand == nullptr) {
           throw IncorrectParsingException("after operator * or / should be an operand",
                                           __PRETTY_FUNCTION__);
         }
-        std::vector<Node*> child_list{cur_node, next_P};
-        cur_node = allocator_.init_alloc(Node(OPERATOR, getOperTypeByOper(oper), child_list));
+        cur_node = allocator_.init_alloc(Node(OPERATOR, getOperTypeByOper(oper), {cur_node, next_operand}));
       }
 
       return cur_node;
@@ -127,6 +140,9 @@ class Parser {
 
       if (expr == nullptr) {
         expr = getN();
+      }
+      if (expr == nullptr) {
+        expr = getParam(func_id, false);
       }
       if (expr == nullptr) {
         expr = getId(func_id);
@@ -411,7 +427,12 @@ class Parser {
     if (!getStr("return")) {
       return nullptr;
     }
-    return allocator_.init_alloc(Node{RETURN, 0});
+    Node* result_node = getE(func_id);
+    if (result_node == nullptr) {
+      return allocator_.init_alloc(Node{RETURN, 0});
+    } else {
+      return allocator_.init_alloc(Node{RETURN, 0, {result_node}});
+    }
   }
 
   Node* getG(int func_id) {
@@ -596,6 +617,38 @@ class Parser {
     return {func_name, func_id};
   }
 
+  Node* getParam(int func_id, bool add_param = false) {
+    LOG(tokens_[token_ptr_].value);
+
+    if (done() || tokens_[token_ptr_].token_type == KEYWORD) {
+      return nullptr;
+    }
+
+    std::string param_name = tokens_[token_ptr_].value;
+    int param_id = tree_.getParamId(param_name, func_id);
+
+    if (!isCorrectVariable(param_name) || (!add_param && param_id == -1)) {
+      return nullptr;
+    }
+
+    ++token_ptr_;
+
+    if (add_param && param_id != -1) {
+      throw IncorrectParsingException(std::string("redeclaration of param ") + param_name,
+                                      __PRETTY_FUNCTION__);
+    }
+    if (add_param && tree_.getVariableAddress(param_name, func_id) != -1) {
+      throw IncorrectParsingException(std::string("redeclaration of param (a variable has such name) ") + param_name,
+                                      __PRETTY_FUNCTION__);
+    }
+
+    if (add_param) {
+      param_id = tree_.addParam(param_name, func_id);
+    }
+
+    return allocator_.init_alloc(Node(PARAM, param_id));
+  }
+
   Node* getFuncHeader(bool add_func = false) {
     Node* func_node = allocator_.init_alloc(Node{USER_FUNCTION, 0});
     std::pair<std::string, int> func_id = getFuncName(add_func, func_node);
@@ -608,6 +661,20 @@ class Parser {
 
     if (!getStr("(")) {
       throw IncorrectParsingException("( was expected after function name", __PRETTY_FUNCTION__);
+    }
+    if (add_func) {
+      Node* param_node = getParam(func_id.second, add_func);
+
+      while (param_node != nullptr) {
+        param_node = getParam(func_id.second, add_func);
+      }
+    } else {
+      Node* e_node = getE(func_id.second);
+
+      while (e_node != nullptr) {
+        func_node->sons.push_back(e_node);
+        e_node = getE(func_id.second);
+      }
     }
 
     if (!getStr(")")) {

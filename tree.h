@@ -308,6 +308,22 @@ class Tree {
     return iter->second;
   }
 
+  int getParamId(const std::string& param_name, int func_id) {
+    auto iter = func_blocks_[func_id].param_shift.find(param_name);
+
+    if (iter == func_blocks_[func_id].param_shift.end()) {
+      return -1;
+    }
+    return iter->second;
+  }
+
+  int addParam(const std::string& param_name, int func_id) {
+    int result = func_blocks_[func_id].param_shift.size();
+
+    func_blocks_[func_id].param_shift[param_name] = result;
+    return result;
+  }
+
   int addFunction(const std::string& func_name, Node* func_node) {
     auto iter = func_map_.find(func_name);
 
@@ -413,19 +429,23 @@ class Tree {
     printTreeRec(root_, tree_file, 0);
   }
 
-  void pushNodeVariable(Node* node, FILE* asm_file) const {
+  int getParamCnt(int func_id) const {
+    return func_blocks_[func_id].param_shift.size();
+  }
+
+  void pushNodeVariable(Node* node, FILE* asm_file, int func_id) const {
     if (node->sons[0]->type == VARIABLE) {
       fprintf(asm_file, "  push [%d]\n", static_cast<int>(node->sons[0]->value));
     } else if (node->sons[0]->type == LOCAL_VARIABLE) {
-      fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
+      fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->sons[0]->value) + getParamCnt(func_id));
     }
   }
 
-  void popNodeVariable(Node* node, FILE* asm_file) const {
+  void popNodeVariable(Node* node, FILE* asm_file, int func_id) const {
     if (node->sons[0]->type == VARIABLE) {
       fprintf(asm_file, "  pop [%d]\n", static_cast<int>(node->sons[0]->value));
     } else if (node->sons[0]->type == LOCAL_VARIABLE) {
-      fprintf(asm_file, "  pop [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
+      fprintf(asm_file, "  pop [rcx+%d]\n", static_cast<int>(node->sons[0]->value) + getParamCnt(func_id));
     }
   }
 
@@ -441,7 +461,7 @@ class Tree {
         for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
           printAsmRec(node->sons[son_id], asm_file, func_id);
           if (func_id != -1) {
-            fprintf(asm_file, "  pop [rcx+%zu]\n", son_id);
+            fprintf(asm_file, "  pop [rcx+%zu]\n", son_id + getParamCnt(func_id));
           } else {
             fprintf(asm_file, "  pop [%zu]\n", son_id);
           }
@@ -476,15 +496,20 @@ class Tree {
       case LOCAL_VARIABLE:
       {
         if (func_id != -1) {
-          fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->value));
+          fprintf(asm_file, "  push [rcx+%zu]\n", func_blocks_[func_id].param_shift.size() +
+                  static_cast<size_t>(node->value));
         } else {
           fprintf(asm_file, "  push [%d]\n", static_cast<int>(node->value));
         }
         break;
       }
+      case PARAM:
+      {
+        fprintf(asm_file, "  push [rcx+%zu]\n", static_cast<size_t>(node->value));
+        break;
+      }
       case OPERATOR:
       {
-
         int oper_type = static_cast<int>(node->value);
 
         if (oper_type != PLUS_EQUAL && oper_type != MINUS_EQUAL
@@ -496,31 +521,31 @@ class Tree {
 
         switch (oper_type) {
           case EQUAL:
-            popNodeVariable(node, asm_file);
+            popNodeVariable(node, asm_file, func_id);
             break;
           case PLUS_EQUAL:
-            pushNodeVariable(node, asm_file);
+            pushNodeVariable(node, asm_file, func_id);
             printAsmRec(node->sons[1], asm_file, func_id);
             fprintf(asm_file, "  add\n");
-            popNodeVariable(node, asm_file);
+            popNodeVariable(node, asm_file, func_id);
             break;
           case MINUS_EQUAL:
-            pushNodeVariable(node, asm_file);
+            pushNodeVariable(node, asm_file, func_id);
             printAsmRec(node->sons[1], asm_file, func_id);
             fprintf(asm_file, "  sub\n");
-            popNodeVariable(node, asm_file);
+            popNodeVariable(node, asm_file, func_id);
             break;
           case MULTIPLY_EQUAL:
-            pushNodeVariable(node, asm_file);
+            pushNodeVariable(node, asm_file, func_id);
             printAsmRec(node->sons[1], asm_file, func_id);
             fprintf(asm_file, "  mul\n");
-            popNodeVariable(node, asm_file);
+            popNodeVariable(node, asm_file, func_id);
             break;
           case DIVIDE_EQUAL:
-            pushNodeVariable(node, asm_file);
+            pushNodeVariable(node, asm_file, func_id);
             printAsmRec(node->sons[1], asm_file, func_id);
             fprintf(asm_file, "  div\n");
-            popNodeVariable(node, asm_file);
+            popNodeVariable(node, asm_file, func_id);
             break;
           case PLUS:
             fprintf(asm_file, "  add\n");
@@ -600,7 +625,19 @@ class Tree {
             fprintf(asm_file, "  sqrt\n");
             break;
           case CALL:
+            fprintf(asm_file, "  push rcx\n");
+            fprintf(asm_file, "  push %zu\n", func_blocks_[func_id].param_shift.size() +
+                                              func_blocks_[func_id].var_shift.size());
+            fprintf(asm_file, "  add\n");
+            fprintf(asm_file, "  pop rcx\n");
+
             fprintf(asm_file, "  call func_%d\n", static_cast<int>(node->sons[0]->value));
+
+            fprintf(asm_file, "  push rcx\n");
+            fprintf(asm_file, "  push %zu\n", func_blocks_[func_id].param_shift.size() +
+                                              func_blocks_[func_id].var_shift.size());
+            fprintf(asm_file, "  sub\n");
+            fprintf(asm_file, "  pop rcx\n");
             break;
           default:
             throw IncorrectArgumentException(std::string("no such operator ") + std::to_string(node->value),
@@ -628,6 +665,9 @@ class Tree {
       }
       case RETURN:
       {
+        if (node->sons.size() == 1) {
+          printAsmRec(node->sons[0], asm_file, func_id);
+        }
         if (func_id != 0) {
           fprintf(asm_file, "  ret\n");
         } else {
@@ -653,13 +693,18 @@ class Tree {
             fprintf(asm_file, "  push 0\n");
             fprintf(asm_file, "  je if_end_%zu\n", cnt_if_);
             printAsmRec(node->sons[1], asm_file, func_id);
-            fprintf(asm_file, "  je if_block_end_%zu\n", cnt_if_);
+            fprintf(asm_file, "  jmp if_block_end_%zu\n", cnt_if_);
             fprintf(asm_file, "  :if_end_%zu\n", cnt_if_);
             if (node->sons.size() > 2) {
               printAsmRec(node->sons[2], asm_file, func_id);
             }
             fprintf(asm_file, "  :if_block_end_%zu\n", cnt_if_);
             ++cnt_if_;
+            break;
+          case ELSE:
+            for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+              printAsmRec(node->sons[son_id], asm_file, func_id);
+            }
             break;
           case WHILE:
             fprintf(asm_file, "  :while_begin_%zu\n", cnt_while_);

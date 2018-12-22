@@ -177,7 +177,7 @@ COMMAND(25, "greater", 0, 0,\
 )
 COMMAND(26, "ngreater", 0, 0,\
   POP_ARGS_AB();\
-  if (arg_a >= arg_b) {\
+  if (arg_a <= arg_b) {\
     PUSH_ITEM(1);\
   } else {\
     PUSH_ITEM(0);\
