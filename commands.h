@@ -130,3 +130,80 @@ COMMAND(19, "sin", 0, 0,\
   double sin_value = sin(arg_a);\
   PUSH_ITEM(sin_value);\
 )
+COMMAND(20, "cos", 0, 0,\
+  POP(arg_a);\
+  double cos_value = cos(arg_a);\
+  PUSH_ITEM(cos_value);\
+)
+COMMAND(21, "is_equal", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a == arg_b) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(22, "is_nequal", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a == arg_b) {\
+    PUSH_ITEM(0);\
+  } else {\
+    PUSH_ITEM(1);\
+  }\
+)
+COMMAND(23, "lower", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a < arg_b) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(24, "nlower", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a >= arg_b) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(25, "greater", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a > arg_b) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(26, "ngreater", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a >= arg_b) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(27, "not", 0, 0,\
+  POP(arg_a);\
+  if (arg_a == 0.0) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(28, "and", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a != 0.0 && arg_b != 0.0) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)
+COMMAND(29, "or", 0, 0,\
+  POP_ARGS_AB();\
+  if (arg_a != 0.0 || arg_b != 0.0) {\
+    PUSH_ITEM(1);\
+  } else {\
+    PUSH_ITEM(0);\
+  }\
+)

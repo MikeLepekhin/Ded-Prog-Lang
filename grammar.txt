@@ -1,22 +1,31 @@
-G := {E | Scan | Print | A | V | \0};
-E := T{[+, -]T}*
-T := P{[*, /]P}*
-P := (E) | N | Id | Sin | Cos | Sqrt | P^P
+G := E | Scan | Print | A | V | If | While | \0
+E := T{[||, +, -]T}*
+T := P{[<=, >=, <, >, ==, !=, &&, *, /]P}*
+P := (E) | N | Id | FuncCall | P^P | !E
+Id := [a-z, A-Z]+[a-z, A-Z, _, 0-9]*
+FuncId := [a-z, A-Z][a-z, A-Z, _, 0-9]*
+A := Id=E
+
 Sin := sin(E)
 Cos := cos(E)
 Sqrt := sqrt(E)
 Scan := scan(Id)
 Print := print(E)
-Id := [a-z, A-Z]+[a-z, A-Z, _, 0-9]*
-A := Id=E
+FuncCall := Sin | Cos | Sqrt | UserFunc
+UserFunc := FuncId()
+DefineFunc := func UserFunc lol G^* kek
+
 Int := int Id[=E]
 Float := float Id[=E]
 Var := var Id[=E]
 InitVar := Int | Float | Var
 InitVars := V*
-FuncId := [a-z, A-Z][a-z, A-Z, _, 0-9]*
-DefineFunc := func FuncId() | func FuncId([, Id]*)
+
+
 DefineFuncs := DefineFunc*
 
 Main := {main()\n}{lol\n}FuncBody{kek}
 Root := InitVars DefineFuncs Main
+
+If := if (E) lol G* kek
+While := while (E) lol G* kek

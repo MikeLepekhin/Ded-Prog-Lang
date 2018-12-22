@@ -53,6 +53,7 @@
 
 enum NodeType {
   ROOT,
+  FUNCS,
   USER_FUNCTION,
   NUMBER,
   VARIABLE,
@@ -62,11 +63,12 @@ enum NodeType {
   MAIN,
   STANDART_FUNCTION,
   VAR_INIT,
-  RETURN
+  RETURN,
+  PARAM
 };
 
 enum StandartFunction {
-  INPUT,
+  INPUT = 1,
   OUTPUT,
   SIN,
   COS,
@@ -75,7 +77,7 @@ enum StandartFunction {
 };
 
 enum LangOperator {
-  EQUAL,
+  EQUAL = 1,
   PLUS,
   MINUS,
   MULTIPLY,
@@ -129,20 +131,48 @@ size_t operPriority(LangOperator oper_type) {
   throw IncorrectArgumentException("it is not an operator", __PRETTY_FUNCTION__);
 }
 
-LangOperator getOperTypeByOper(char oper) {
-  switch (oper) {
-    case '+':
-      return PLUS;
-    case '-':
-      return MINUS;
-    case '*':
-      return MULTIPLY;
-    case '/':
-      return DIVIDE;
-    default:
-      throw IncorrectArgumentException(std::string("no such operator provided: ") + oper,
-                                       __PRETTY_FUNCTION__);
+LangOperator getOperTypeByOper(const std::string& oper) {
+  if (oper == "+") {
+    return PLUS;
   }
+  if (oper == "-") {
+    return MINUS;
+  }
+  if (oper == "*") {
+    return MULTIPLY;
+  }
+  if (oper == "/") {
+    return DIVIDE;
+  }
+  if (oper == "==") {
+    return BOOL_EQUAL;
+  }
+  if (oper == "!=") {
+    return BOOL_NOT_EQUAL;
+  }
+  if (oper == "!") {
+    return BOOL_NOT;
+  }
+  if (oper == "&&") {
+    return BOOL_AND;
+  }
+  if (oper == "||") {
+    return BOOL_OR;
+  }
+  if (oper == "<") {
+    return BOOL_LOWER;
+  }
+  if (oper == ">") {
+    return BOOL_GREATER;
+  }
+  if (oper == ">=") {
+    return BOOL_NOT_LOWER;
+  }
+  if (oper == "<=") {
+    return BOOL_NOT_GREATER;
+  }
+  throw IncorrectArgumentException(std::string("no such operator provided: ") + oper,
+                                    __PRETTY_FUNCTION__);
 }
 
 char getOperByOperType(LangOperator oper_type) {
@@ -195,8 +225,10 @@ class Tree {
   Node* root_{nullptr};
   std::unordered_map<std::string, size_t> global_var_map_;
   std::unordered_map<std::string, size_t> func_map_;
-
   std::vector<FuncBlock> func_blocks_;
+
+  mutable size_t cnt_if_{0};
+  mutable size_t cnt_while_{0};
 
  public:
   static StackAllocator<Node> allocator_;
@@ -277,6 +309,12 @@ class Tree {
   }
 
   int addFunction(const std::string& func_name, Node* func_node) {
+    auto iter = func_map_.find(func_name);
+
+    if (iter != func_map_.end()) {
+      func_blocks_[iter->second].func_node = func_node;
+      return iter->second;
+    }
     int result = func_map_.size();
 
     func_map_[func_name] = result;
@@ -351,7 +389,7 @@ class Tree {
     }
     std::sort(funcs.begin(), funcs.end());
     for (const std::pair<size_t, std::string>& cp: funcs) {
-      fprintf(tree_file, "%s 0 %zu\n", cp.second.c_str(), func_blocks_[cp.first].var_shift.size());
+      fprintf(tree_file, "%s: PARAMS 0 NEWVAR %zu\n", cp.second.c_str(), func_blocks_[cp.first].var_shift.size());
       printFuncVars(tree_file, func_blocks_[cp.first].var_shift);
     }
   }
@@ -375,6 +413,22 @@ class Tree {
     printTreeRec(root_, tree_file, 0);
   }
 
+  void pushNodeVariable(Node* node, FILE* asm_file) const {
+    if (node->sons[0]->type == VARIABLE) {
+      fprintf(asm_file, "  push [%d]\n", static_cast<int>(node->sons[0]->value));
+    } else if (node->sons[0]->type == LOCAL_VARIABLE) {
+      fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
+    }
+  }
+
+  void popNodeVariable(Node* node, FILE* asm_file) const {
+    if (node->sons[0]->type == VARIABLE) {
+      fprintf(asm_file, "  pop [%d]\n", static_cast<int>(node->sons[0]->value));
+    } else if (node->sons[0]->type == LOCAL_VARIABLE) {
+      fprintf(asm_file, "  pop [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
+    }
+  }
+
   void printAsmRec(Node* node, FILE* asm_file, int func_id) const {
     if (node == nullptr) {
       return;
@@ -383,7 +437,7 @@ class Tree {
     switch (node->type) {
       case VAR_INIT:
       {
-        std::cout << "var_init " << func_id << '\n';
+       // std::cout << "var_init " << func_id << '\n';
         for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
           printAsmRec(node->sons[son_id], asm_file, func_id);
           if (func_id != -1) {
@@ -392,24 +446,27 @@ class Tree {
             fprintf(asm_file, "  pop [%zu]\n", son_id);
           }
         }
-        if (func_id == -1) {
-          fprintf(asm_file, "  jmp func_0\n");
-        }
         return;
       }
       case USER_FUNCTION:
       {
-        func_id = node->value;
-        fprintf(asm_file, ":func_label%d\n", static_cast<int>(node->value));
-        for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-          printAsmRec(node->sons[son_id], asm_file, func_id);
+        std::cout << "print user function " << node->value << " from" << func_id << "\n";
+        if (func_id == -1) {
+          func_id = node->value;
+          fprintf(asm_file, ":func_%d\n", static_cast<int>(node->value));
+          for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+            printAsmRec(node->sons[son_id], asm_file, node->value);
+          }
+          fprintf(asm_file, "  ret\n");
+        } else {
+          fprintf(asm_file, "  call func_%d\n", static_cast<int>(node->value));
         }
-        break;
+        return;
       }
       case NUMBER:
       {
         fprintf(asm_file, "  push %.6lf\n", node->value);
-        break;
+        return;
       }
       case VARIABLE:
       {
@@ -427,37 +484,82 @@ class Tree {
       }
       case OPERATOR:
       {
-        for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-          printAsmRec(node->sons[son_id], asm_file, func_id);
-        }
+
         int oper_type = static_cast<int>(node->value);
 
+        if (oper_type != PLUS_EQUAL && oper_type != MINUS_EQUAL
+            && oper_type != MULTIPLY_EQUAL && oper_type != DIVIDE_EQUAL) {
+          for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+            printAsmRec(node->sons[son_id], asm_file, func_id);
+          }
+        }
+
         switch (oper_type) {
-          case PLUS:fprintf(asm_file, "  add\n");
+          case EQUAL:
+            popNodeVariable(node, asm_file);
             break;
-          case MINUS:fprintf(asm_file, "  sub\n");
+          case PLUS_EQUAL:
+            pushNodeVariable(node, asm_file);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  add\n");
+            popNodeVariable(node, asm_file);
             break;
-          case MULTIPLY:fprintf(asm_file, "  mul\n");
+          case MINUS_EQUAL:
+            pushNodeVariable(node, asm_file);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  sub\n");
+            popNodeVariable(node, asm_file);
             break;
-          case DIVIDE:fprintf(asm_file, "  div\n");
+          case MULTIPLY_EQUAL:
+            pushNodeVariable(node, asm_file);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  mul\n");
+            popNodeVariable(node, asm_file);
             break;
-          case POWER:fprintf(asm_file, "  power\n");
+          case DIVIDE_EQUAL:
+            pushNodeVariable(node, asm_file);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  div\n");
+            popNodeVariable(node, asm_file);
             break;
-          case BOOL_EQUAL:fprintf(asm_file, "  eq\n");
+          case PLUS:
+            fprintf(asm_file, "  add\n");
             break;
-          case BOOL_NOT_EQUAL:fprintf(asm_file, "  neq\n");
+          case MINUS:
+            fprintf(asm_file, "  sub\n");
             break;
-          case BOOL_AND:fprintf(asm_file, "  and\n");
+          case MULTIPLY:
+            fprintf(asm_file, "  mul\n");
             break;
-          case BOOL_OR:fprintf(asm_file, "  or\n");
+          case DIVIDE:
+            fprintf(asm_file, "  div\n");
             break;
-          case BOOL_GREATER:fprintf(asm_file, "  greater\n");
+          case POWER:
+            fprintf(asm_file, "  power\n");
             break;
-          case BOOL_LOWER:fprintf(asm_file, "  lower\n");
+          case BOOL_EQUAL:
+            fprintf(asm_file, "  is_equal\n");
             break;
-          case BOOL_NOT_GREATER:fprintf(asm_file, "  ngreater\n");
+          case BOOL_NOT_EQUAL:
+            fprintf(asm_file, "  is_nequal\n");
             break;
-          case BOOL_NOT_LOWER:fprintf(asm_file, "  nlower\n");
+          case BOOL_AND:
+            fprintf(asm_file, "  and\n");
+            break;
+          case BOOL_OR:
+            fprintf(asm_file, "  or\n");
+            break;
+          case BOOL_GREATER:
+            fprintf(asm_file, "  greater\n");
+            break;
+          case BOOL_LOWER:
+            fprintf(asm_file, "  lower\n");
+            break;
+          case BOOL_NOT_GREATER:
+            fprintf(asm_file, "  ngreater\n");
+            break;
+          case BOOL_NOT_LOWER:
+            fprintf(asm_file, "  nlower\n");
             break;
           default:
             throw IncorrectArgumentException(std::string("no such operator ") + std::to_string(node->value),
@@ -515,13 +617,80 @@ class Tree {
         fprintf(asm_file, "  end\n");
         break;
       }
-      default:
+      case FUNCS:
       {
-        //std::cout << "node_type " << node->type << '\n';
+        std::cout << "user func count " << node->sons.size() << "\n";
         for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+          std::cout << "declare func " << node->sons[son_id]->value << " from " << func_id << "\n";
           printAsmRec(node->sons[son_id], asm_file, func_id);
         }
         break;
+      }
+      case RETURN:
+      {
+        if (func_id != 0) {
+          fprintf(asm_file, "  ret\n");
+        } else {
+          fprintf(asm_file, "  end\n");
+        }
+        break;
+      }
+      case ROOT:
+      {
+        printAsmRec(node->sons[0], asm_file, func_id);
+        fprintf(asm_file, "  jmp func_0\n");
+        printAsmRec(node->sons[1], asm_file, func_id);
+        printAsmRec(node->sons[2], asm_file, func_id);
+        break;
+      }
+      case LOGIC:
+      {
+        int logic_type = static_cast<int>(node->value);
+
+        switch (logic_type) {
+          case IF:
+            printAsmRec(node->sons[0], asm_file, func_id);
+            fprintf(asm_file, "  push 0\n");
+            fprintf(asm_file, "  je if_end_%zu\n", cnt_if_);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  je if_block_end_%zu\n", cnt_if_);
+            fprintf(asm_file, "  :if_end_%zu\n", cnt_if_);
+            if (node->sons.size() > 2) {
+              printAsmRec(node->sons[2], asm_file, func_id);
+            }
+            fprintf(asm_file, "  :if_block_end_%zu\n", cnt_if_);
+            ++cnt_if_;
+            break;
+          case WHILE:
+            fprintf(asm_file, "  :while_begin_%zu\n", cnt_while_);
+            printAsmRec(node->sons[0], asm_file, func_id);
+            fprintf(asm_file, "  push 0\n");
+            fprintf(asm_file, "  je while_end_%zu\n", cnt_while_);
+            printAsmRec(node->sons[1], asm_file, func_id);
+            fprintf(asm_file, "  jmp while_begin_%zu\n", cnt_while_);
+            fprintf(asm_file, "  :while_end_%zu\n", cnt_while_);
+            ++cnt_while_;
+            break;
+          case CONDITION:
+            printAsmRec(node->sons[0], asm_file, func_id);
+            break;
+          case CONDITION_MET:
+          {
+            for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+              printAsmRec(node->sons[son_id], asm_file, func_id);
+            }
+            break;
+          }
+          default:
+            throw IncorrectArgumentException(std::string("no such separate logic block was provided: ")
+                                               + std::to_string(logic_type), __PRETTY_FUNCTION__);
+        }
+        break;
+      }
+      default:
+      {
+        throw IncorrectArgumentException(std::string("no such node type:") + std::to_string(node->type),
+                                         __PRETTY_FUNCTION__);
       }
     }
   }

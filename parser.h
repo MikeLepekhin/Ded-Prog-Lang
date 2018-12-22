@@ -21,7 +21,6 @@ class Parser {
   std::vector<Token> tokens_;
   size_t token_ptr_;
   StackAllocator<Node>& allocator_;
-  std::unordered_set<std::string> reserved_words_;
 
   bool compareToken(const std::string& str) {
     return !done() && tokens_[token_ptr_].value == str;
@@ -44,6 +43,9 @@ class Parser {
 
   Node* getE(int func_id) {
     LOG("getE");
+    if (done()) {
+      return nullptr;
+    }
 
     try {
       Node *cur_node = getT(func_id);
@@ -51,8 +53,8 @@ class Parser {
         return nullptr;
       }
 
-      while (compareToken("+") || compareToken("-")) {
-        char oper = tokens_[token_ptr_].value[0];
+      while (compareToken("+") || compareToken("-") || compareToken("||")) {
+        std::string oper = tokens_[token_ptr_].value;
         ++token_ptr_;
         Node *next_T = getT(func_id);
 
@@ -80,8 +82,9 @@ class Parser {
         return nullptr;
       }
 
-      while (compareToken("*") || compareToken("/")) {
-        char oper = tokens_[token_ptr_].value[0];
+      while (compareToken("*") || compareToken("/") || compareToken("==") || compareToken("!=") ||
+            compareToken("<=") || compareToken(">=") || compareToken("<") || compareToken(">")) {
+        std::string oper = tokens_[token_ptr_].value;
         ++token_ptr_;
         Node *next_P = getP(func_id);
 
@@ -112,6 +115,8 @@ class Parser {
           --token_ptr_;
           return nullptr;
         }
+
+        LOG(token_ptr_);
         if (!compareToken(")")) {
           throw IncorrectParsingException(") was expected",
                                           __PRETTY_FUNCTION__);
@@ -127,23 +132,31 @@ class Parser {
         expr = getId(func_id);
       }
       if (expr == nullptr) {
-        expr = getSin(func_id);
+        expr = getFuncCall(func_id);
       }
-      if (expr == nullptr) {
-        expr = getCos(func_id);
-      }
-      if (expr == nullptr) {
-        expr = getSqrt(func_id);
-      }
-      /*if (expr == nullptr) {
-        throw IncorrectParsingException("incorrect value for P",
-                                        __PRETTY_FUNCTION__);
-      }*/
 
       return expr;
     } catch (InterpreterException& exc) {
       throw exc;
     }
+  }
+
+  Node* getFuncCall(int func_id) {
+    Node* func_node = nullptr;
+
+    if (func_node == nullptr) {
+      func_node = getSin(func_id);
+    }
+    if (func_node == nullptr) {
+      func_node = getCos(func_id);
+    }
+    if (func_node == nullptr) {
+      func_node = getSqrt(func_id);
+    }
+    if (func_node == nullptr) {
+      func_node = getFuncHeader(false);
+    }
+    return func_node;
   }
 
   bool isVariableNameBegin(char ch) const {
@@ -154,45 +167,41 @@ class Parser {
     return isVariableNameBegin(ch) || ch == '_' || isdigit(ch);
   }
 
+  bool isCorrectVariable(const std::string& str) const {
+    bool correct_name = isVariableNameBegin(str[0]);
+
+    for (char ch: str) {
+      correct_name &= (isVariableNameChar(ch));
+    }
+    return correct_name;
+  }
+
   Node* getId(int func_id, bool add_var = false) {
-    if (done()) {
+    if (done() || tokens_[token_ptr_].token_type == KEYWORD) {
       return nullptr;
     }
     const std::string& cur_token = tokens_[token_ptr_].value;
 
-    if (reserved_words_.find(cur_token) != reserved_words_.end()) {
-      return nullptr;
-    }
-
     LOG("getId");
     LOG(std::to_string(token_ptr_));
 
-    if (tokens_[token_ptr_].token_type != STRING || !isVariableNameBegin(cur_token[0])) {
+    if (!isCorrectVariable(cur_token)) {
       return nullptr;
     }
 
-    bool correct_name = true;
-    for (char ch: cur_token) {
-      correct_name &= (isVariableNameChar(ch));
-    }
-    if (!correct_name) {
-      return nullptr;
-    }
-
-    ++token_ptr_;
     int local_address = tree_.getVariableAddress(cur_token, func_id);
     int global_address = tree_.getVariableAddress(cur_token, -1);
     NodeType node_type = VARIABLE;
 
+    if (!add_var && global_address == -1 && local_address == -1) {
+      return nullptr;
+    }
+    ++token_ptr_;
     if (!add_var && global_address != -1) {
       node_type = VARIABLE;
     } else if (!add_var && local_address != -1) {
       node_type = LOCAL_VARIABLE;
-    } else if (!add_var) {
-      throw IncorrectArgumentException(std::string("undefined variable: ") + cur_token,
-                                       __PRETTY_FUNCTION__);
-    }
-    if (add_var && local_address != -1) {
+    } else if (add_var && local_address != -1) {
       throw IncorrectArgumentException(std::string("variable redefinition: ") + cur_token,
                                        __PRETTY_FUNCTION__);
     } else if (add_var) {
@@ -200,9 +209,7 @@ class Parser {
         node_type = LOCAL_VARIABLE;
       }
       LOG("I want to add var");
-      if (add_var) {
-        local_address = tree_.addVariable(cur_token, func_id, allocator_.init_alloc(Node{NUMBER, 0}));
-      }
+      local_address = tree_.addVariable(cur_token, func_id, allocator_.init_alloc(Node{NUMBER, 0}));
       LOG(std::string("its address is ") + std::to_string(local_address));
       LOG("getId on finish line");
     }
@@ -219,7 +226,6 @@ class Parser {
       if (done()) {
         return nullptr;
       }
-      const std::string& cur_token = tokens_[token_ptr_].value;
 
       LOG("getVariableTemplate");
       LOG(std::to_string(token_ptr_));
@@ -230,11 +236,16 @@ class Parser {
       Node* var_node = getId(func_id, true);
       Node* value_node = allocator_.init_alloc(Node(NUMBER, 0.0));
 
+      if (var_node == nullptr) {
+        throw IncorrectParsingException(std::string("after ") + type + " should be a variable name",
+                                        __PRETTY_FUNCTION__);
+      }
+
       if (tokens_[token_ptr_].value == "=") {
         ++token_ptr_;
         value_node = getE(func_id);
         if (value_node == nullptr) {
-          throw IncorrectParsingException("after = character should be an experssion",
+          throw IncorrectParsingException("after = character should be an expression",
                                           __PRETTY_FUNCTION__);
         }
       }
@@ -295,27 +306,23 @@ class Parser {
   Node* getScan(int func_id) {
     LOG("getScan");
     LOG(std::to_string(token_ptr_));
-    const std::string& cur_token = tokens_[token_ptr_].value;
 
     try {
-      if (cur_token != "scan") {
+      if (!getStr("scan")) {
         return nullptr;
       }
-      ++token_ptr_;
-      if (tokens_[token_ptr_].value != "(") {
+      if (!getStr("(")) {
         throw IncorrectParsingException("( was expected after scan", __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
       Node *var_node = getId(func_id);
 
       if (var_node == nullptr) {
         throw IncorrectArgumentException("scan is available only for variables",
                                          __PRETTY_FUNCTION__);
       }
-      if (tokens_[token_ptr_].value != ")") {
+      if (!getStr(")")) {
         throw IncorrectParsingException(") was expected after scan", __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
       return allocator_.init_alloc(Node(STANDART_FUNCTION, INPUT, {var_node}));
     } catch (InterpreterException& exc) {
       throw exc;
@@ -341,7 +348,7 @@ class Parser {
       Node *expr_node = getE(func_id);
 
       if (expr_node == nullptr) {
-        throw IncorrectArgumentException("scan is available only for variables",
+        throw IncorrectArgumentException("print requires an expression",
                                          __PRETTY_FUNCTION__);
       }
       if (tokens_[token_ptr_].value != ")") {
@@ -355,28 +362,56 @@ class Parser {
   }
 
   Node* getA(int func_id) {
+    if (done() || tokens_[token_ptr_].token_type == KEYWORD) {
+      return nullptr;
+    }
+
     LOG("getA");
     LOG(std::to_string(token_ptr_));
+    LOG(std::string(tokens_[token_ptr_].value));
 
     try {
-      Node *var_node = getId(func_id);
+      Node* var_node = getId(func_id);
       if (!var_node) {
         return nullptr;
       }
-      if (tokens_[token_ptr_].token_type != ASSIGN) {
+
+      LangOperator oper_type = EQUAL;
+
+      if (getStr("=")) {
+        oper_type = EQUAL;
+      } else if (getStr("+=")) {
+        oper_type = PLUS_EQUAL;
+      } else if (getStr("-=")) {
+        oper_type = MINUS_EQUAL;
+      } else if (getStr("*=")) {
+        oper_type = MULTIPLY_EQUAL;
+      } else if (getStr("/=")) {
+        oper_type = DIVIDE_EQUAL;
+      } else {
         return nullptr;
       }
-      ++token_ptr_;
-      Node *expr_node = getE(func_id);
+      Node* expr_node = getE(func_id);
 
       if (expr_node == nullptr) {
+        LOG(std::to_string(token_ptr_));
+        LOG(std::string(tokens_[token_ptr_].value));
         throw IncorrectParsingException("an expression was expected after =", __PRETTY_FUNCTION__);
       }
 
-      return allocator_.init_alloc(Node(OPERATOR, EQUAL, {var_node, expr_node}));
+      return allocator_.init_alloc(Node(OPERATOR, oper_type, {var_node, expr_node}));
     } catch (InterpreterException& exc) {
       throw exc;
     }
+  }
+
+  Node* getReturn(int func_id) {
+    LOG("getReturn");
+
+    if (!getStr("return")) {
+      return nullptr;
+    }
+    return allocator_.init_alloc(Node{RETURN, 0});
   }
 
   Node* getG(int func_id) {
@@ -384,16 +419,33 @@ class Parser {
       LOG("getG");
       LOG(std::to_string(token_ptr_));
 
+      if (done() || tokens_[token_ptr_].value == "lol" ||
+        tokens_[token_ptr_].value == "kek") {
+        return nullptr;
+      }
+
       Node *node = getScan(func_id);
 
       if (node == nullptr) {
         node = getPrint(func_id);
       }
       if (node == nullptr) {
+        node = getReturn(func_id);
+      }
+      if (node == nullptr) {
         node = getV(func_id);
       }
       if (node == nullptr) {
         node = getA(func_id);
+      }
+      if (node == nullptr) {
+        node = getLogic(func_id, "if");
+      }
+      if (node == nullptr) {
+        node = getLogic(func_id, "while");
+      }
+      if (node == nullptr) {
+        node = getFuncCall(func_id);
       }
       if (node == nullptr) {
         node = getE(func_id);
@@ -403,12 +455,11 @@ class Parser {
         return nullptr;
       }
 
-      if (tokens_[token_ptr_].value != ";") {
+      if (node->type != LOGIC && !getStr(";")) {
         std::cout << token_ptr_ << '\n';
         std::cout << tokens_[token_ptr_].value << '\n';
         throw IncorrectParsingException("where ; ???", __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
 
       return node;
     } catch (InterpreterException& exc) {
@@ -425,6 +476,10 @@ class Parser {
   }
 
   Node* getVarInit(int func_id) {
+    if (func_id == -1) {
+      tree_.getRoot()->sons[0] = allocator_.init_alloc(Node{VAR_INIT, 0});
+    }
+
     Node* cur_var = getV(func_id);
 
     while (cur_var != nullptr) {
@@ -436,35 +491,205 @@ class Parser {
     return nullptr;
   }
 
+  Node* getElse(int func_id) {
+    if (!getStr("else")) {
+      return nullptr;
+    }
+    if (!getStr("lol")) {
+      throw IncorrectParsingException("where is lol???", __PRETTY_FUNCTION__);
+    }
+    Node* else_node = allocator_.init_alloc(Node{LOGIC, ELSE});
+    Node* g_node = getG(func_id);
+
+    while (g_node != nullptr) {
+      LOG("getG from else");
+      else_node->sons.push_back(g_node);
+      g_node = getG(func_id);
+    }
+    if (!getStr("kek")) {
+      throw IncorrectParsingException("where is kek???", __PRETTY_FUNCTION__);
+    }
+    return else_node;
+  }
+
+  Node* getLogic(int func_id, const std::string& oper) {
+    try {
+      if (!getStr(oper)) {
+        return nullptr;
+      }
+
+      if (!getStr("(")) {
+        throw IncorrectParsingException(std::string("( was expected after ") + oper,
+                                        __PRETTY_FUNCTION__);
+      }
+
+      Node *expr_node = getE(func_id);
+
+      if (expr_node == nullptr) {
+        throw IncorrectParsingException(std::string("logic expression was expected in") + oper,
+                                        __PRETTY_FUNCTION__);
+      }
+
+      Node* condition_node = allocator_.init_alloc(Node{LOGIC, CONDITION, {expr_node}});
+
+      if (!getStr(")")) {
+        throw IncorrectParsingException(") was expected after (", __PRETTY_FUNCTION__);
+      }
+      if (!getStr("lol")) {
+        throw IncorrectParsingException("where is lol???", __PRETTY_FUNCTION__);
+      }
+
+      Node* condition_met_node = allocator_.init_alloc(Node{LOGIC, CONDITION_MET});
+      Node* g_node = getG(func_id);
+
+      while (g_node != nullptr) {
+        LOG("getG from If");
+        condition_met_node->sons.push_back(g_node);
+        g_node = getG(func_id);
+      }
+
+      if (!getStr("kek")) {
+        throw IncorrectParsingException("where is kek???", __PRETTY_FUNCTION__);
+      }
+
+      Node* result_node = allocator_.init_alloc(Node{LOGIC, (oper == "if" ? IF : WHILE),
+                                                    {condition_node, condition_met_node}});
+      if (oper == "if") {
+        Node* else_node = getElse(func_id);
+
+        if (else_node != nullptr) {
+          result_node->sons.push_back(else_node);
+        }
+      }
+
+      return result_node;
+    } catch (InterpreterException& exc) {
+      throw exc;
+    }
+  }
+
+
+  std::pair<std::string, int> getFuncName(bool add_func = false, Node* func_node = nullptr) {
+    LOG(tokens_[token_ptr_].value);
+
+    if (done() || tokens_[token_ptr_].token_type == KEYWORD) {
+      return {"", -1};
+    }
+
+    std::string func_name = tokens_[token_ptr_].value;
+    int func_id = tree_.getFunctionId(func_name);
+
+    if ((!add_func && func_id == -1) || !isCorrectVariable(func_name)) {
+      return {"", -1};
+    }
+    ++token_ptr_;
+
+    if (add_func && func_id != -1) {
+      throw IncorrectParsingException(std::string("redeclaration of function ") + func_name,
+                                      __PRETTY_FUNCTION__);
+    }
+    if (add_func) {
+      func_id = tree_.addFunction(func_name, func_node);
+      LOG(std::string("function ") + func_name + std::string(" was added with id ") + std::to_string(func_id));
+    }
+
+    return {func_name, func_id};
+  }
+
+  Node* getFuncHeader(bool add_func = false) {
+    Node* func_node = allocator_.init_alloc(Node{USER_FUNCTION, 0});
+    std::pair<std::string, int> func_id = getFuncName(add_func, func_node);
+
+    if (func_id.first.empty()) {
+      return nullptr;
+    }
+    func_node->value = func_id.second;
+
+
+    if (!getStr("(")) {
+      throw IncorrectParsingException("( was expected after function name", __PRETTY_FUNCTION__);
+    }
+
+    if (!getStr(")")) {
+      throw IncorrectParsingException(") was expected after (", __PRETTY_FUNCTION__);
+    }
+    return func_node;
+  }
+
+  Node* getFunc() {
+    try {
+      if (!getStr("func")) {
+        return nullptr;
+      }
+
+      LOG(std::string("getFunc ") + std::to_string(token_ptr_));
+      Node* func_node = getFuncHeader(true);
+
+      if (func_node == nullptr) {
+        throw IncorrectParsingException("function name was expected after func", __PRETTY_FUNCTION__);
+      }
+
+      if (!getStr("lol")) {
+        throw IncorrectParsingException("where is lol???", __PRETTY_FUNCTION__);
+      }
+
+      func_node->sons.push_back(allocator_.init_alloc(Node{VAR_INIT, 0}));
+
+      Node* g_node = getG(func_node->value);
+      while (g_node != nullptr) {
+        func_node->sons.push_back(g_node);
+        g_node = getG(func_node->value);
+      }
+
+      if (!getStr("kek")) {
+        throw IncorrectParsingException("where is kek???", __PRETTY_FUNCTION__);
+      }
+
+      return func_node;
+    } catch (InterpreterException& exc) {
+      throw exc;
+    }
+  }
+
   Node* getFuncs() {
-    return nullptr;
+    try {
+      Node *func_init = allocator_.init_alloc(Node{FUNCS, 0});
+      Node *cur_func = getFunc();
+
+      while (cur_func != nullptr) {
+        func_init->sons.push_back(cur_func);
+        cur_func = getFunc();
+      }
+      return func_init;
+    } catch (InterpreterException& exc) {
+      throw exc;
+    }
   }
 
   Node* getMain() {
     LOG("getMain");
 
     try {
-      if (tokens_[token_ptr_].value != "main") {
-        LOG("no main()");
-        return nullptr;
+      if (!getStr("main")) {
+        throw IncorrectParsingException("main() was expected",
+                                        __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
-      if (tokens_[token_ptr_].value != "(") {
+      if (!getStr("(")) {
         throw IncorrectParsingException("( was expected after main",
                                         __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
-      if (tokens_[token_ptr_].value != ")") {
-        throw IncorrectParsingException(") was expected after main(",
+      if (!getStr(")")) {
+        throw IncorrectParsingException(") was expected after (",
                                         __PRETTY_FUNCTION__);
       }
-      ++token_ptr_;
 
       if (!getStr("lol")) {
-        LOG("no lol");
-        return nullptr;
+        throw IncorrectParsingException("no lol",
+                                        __PRETTY_FUNCTION__);
       }
+
       Node* main_node = allocator_.init_alloc(Node(MAIN, 0.0));
+
       tree_.addFunction("main", main_node);
       main_node->sons.push_back(allocator_.init_alloc(Node{VAR_INIT, 0.0}));
 
@@ -487,14 +712,25 @@ class Parser {
   }
 
   Node* getRoot() {
-    LOG("getRoot");
-    tree_.setRoot(allocator_.init_alloc(Node{ROOT, 0.0, {nullptr, nullptr, nullptr}}));
-    tree_.getRoot()->sons[0] = allocator_.init_alloc(Node{VAR_INIT, 0.0, {}});
+    try {
+      LOG("getRoot");
+      tree_.setRoot(allocator_.init_alloc(Node{ROOT, 0.0, {nullptr, nullptr, nullptr}}));
 
-    Node* var_init_node = getVarInit(-1);
-    tree_.getRoot()->sons[1] = getFuncs();
-    tree_.getRoot()->sons[2] = getMain();
-    return tree_.getRoot();
+      tree_.getRoot()->sons[0] = allocator_.init_alloc(Node{VAR_INIT, 0});
+      getVarInit(-1);
+      tree_.addFunction("main", nullptr);
+      tree_.getRoot()->sons[1] = getFuncs();
+      tree_.getRoot()->sons[2] = getMain();
+
+      if (token_ptr_ != tokens_.size()) {
+        throw IncorrectParsingException(std::string("undefined variable: ") + tokens_[token_ptr_].value,
+                                        __PRETTY_FUNCTION__);
+      }
+
+      return tree_.getRoot();
+    } catch (InterpreterException& exc) {
+      throw exc;
+    }
   }
 
   Node* getBuiltinFunc(int func_id, const std::string& str, StandartFunction func_type) {

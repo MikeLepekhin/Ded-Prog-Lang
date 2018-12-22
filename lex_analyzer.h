@@ -61,7 +61,8 @@ class LexAnalyzer {
 
   bool isSeparator(char ch) const {
     return ch == ',' || ch == ';' || ch == '!' || ch == '&' ||
-           ch == '|' || ch == '<' || ch == '>' || ch == '=';
+           ch == '|' || ch == '<' || ch == '>' || ch == '=' ||
+           ch == '+' || ch == '-' || ch == '*' || ch == '/';
   }
 
   std::set<std::string> keywords_;
@@ -84,6 +85,10 @@ class LexAnalyzer {
     keywords_.insert("main");
     keywords_.insert("sin");
     keywords_.insert("cos");
+    keywords_.insert("scan");
+    keywords_.insert("print");
+    keywords_.insert("sqrt");
+    keywords_.insert("return");
   }
 
   bool done() const {
@@ -150,10 +155,11 @@ class LexAnalyzer {
     Token result;
 
     std::vector<std::string> oper_strs{"==", "!=", "!", "<=", ">=", "<", ">",
-                                       "||", "&&", "+=", "-=", "*=", "/="};
+                                       "||", "&&", "+=", "-=", "*=", "/=",
+                                       "+", "-", "*", "/", "="};
 
     for (const std::string& oper_str: oper_strs) {
-      result = result = parseString(oper_str, OPER);
+      result = parseString(oper_str, OPER);
       if (result.value != "") {
         break;
       }

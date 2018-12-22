@@ -111,6 +111,7 @@ class Processor {
 #define COMMAND(cmd_id, name, arg_cnt, arg_mask, source_cmd) \
     case cmd_id:\
     {\
+      /*std::cout << "execute command " << cmd_id << "\n";*/\
       source_cmd\
       break;\
     }
