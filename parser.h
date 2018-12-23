@@ -138,6 +138,12 @@ class Parser {
         return expr;
       }
 
+      if (getStr("!")) {
+        expr = allocator_.init_alloc(Node{OPERATOR, BOOL_NOT, {getP(func_id)}});
+      } else if (getStr("-")) {
+        expr = allocator_.init_alloc(Node{OPERATOR, MINUS, {getP(func_id)}});
+      }
+
       if (expr == nullptr) {
         expr = getN();
       }
@@ -398,7 +404,11 @@ class Parser {
     LOG(std::string(tokens_[token_ptr_].value));
 
     try {
-      Node* var_node = getId(func_id);
+      Node* var_node = getParam(func_id);
+
+      if (!var_node) {
+        var_node = getId(func_id);
+      }
       if (!var_node) {
         return nullptr;
       }
@@ -550,6 +560,7 @@ class Parser {
         return nullptr;
       }
 
+      LOG(oper);
       if (!getStr("(")) {
         throw IncorrectParsingException(std::string("( was expected after ") + oper,
                                         __PRETTY_FUNCTION__);
@@ -575,12 +586,14 @@ class Parser {
       Node* g_node = getG(func_id);
 
       while (g_node != nullptr) {
-        LOG("getG from If");
+        LOG(std::string("getG from ") + oper);
         condition_met_node->sons.push_back(g_node);
         g_node = getG(func_id);
       }
 
       if (!getStr("kek")) {
+        LOG(std::to_string(token_ptr_));
+        LOG(tokens_[token_ptr_].value);
         throw IncorrectParsingException("where is kek???", __PRETTY_FUNCTION__);
       }
 

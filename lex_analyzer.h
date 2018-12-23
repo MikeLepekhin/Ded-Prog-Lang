@@ -98,10 +98,19 @@ class LexAnalyzer {
   Token parseInt() {
     std::string result = "";
 
+    if (*buf_ptr_ == '-') {
+      result.push_back('-');
+      ++buf_ptr_;
+    }
     while (!done() && std::isdigit(*buf_ptr_)) {
       result.push_back(*buf_ptr_);
       ++buf_ptr_;
     }
+    if (result == "-") {
+      result = "";
+      --buf_ptr_;
+    }
+
     return {result, INTEGER};
   }
 

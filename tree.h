@@ -443,6 +443,8 @@ class Tree {
       fprintf(asm_file, "  push [%d]\n", static_cast<int>(node->sons[0]->value));
     } else if (node->sons[0]->type == LOCAL_VARIABLE) {
       fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->sons[0]->value) + getParamCnt(func_id));
+    } else if (node->sons[0]->type == PARAM) {
+      fprintf(asm_file, "  push [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
     }
   }
 
@@ -451,6 +453,8 @@ class Tree {
       fprintf(asm_file, "  pop [%d]\n", static_cast<int>(node->sons[0]->value));
     } else if (node->sons[0]->type == LOCAL_VARIABLE) {
       fprintf(asm_file, "  pop [rcx+%d]\n", static_cast<int>(node->sons[0]->value) + getParamCnt(func_id));
+    } else if (node->sons[0]->type == PARAM) {
+      fprintf(asm_file, "  pop [rcx+%d]\n", static_cast<int>(node->sons[0]->value));
     }
   }
 
@@ -517,6 +521,10 @@ class Tree {
       {
         int oper_type = static_cast<int>(node->value);
 
+        if (node->sons.size() == 1 && oper_type == MINUS) {
+          fprintf(asm_file, "  push 0\n");
+        }
+
         if (oper_type != PLUS_EQUAL && oper_type != MINUS_EQUAL
             && oper_type != MULTIPLY_EQUAL && oper_type != DIVIDE_EQUAL) {
           for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
@@ -526,6 +534,7 @@ class Tree {
 
         switch (oper_type) {
           case EQUAL:
+            printAsmRec(node->sons[1], asm_file, func_id);
             popNodeVariable(node, asm_file, func_id);
             break;
           case PLUS_EQUAL:
@@ -572,6 +581,9 @@ class Tree {
             break;
           case BOOL_NOT_EQUAL:
             fprintf(asm_file, "  is_nequal\n");
+            break;
+          case BOOL_NOT:
+            fprintf(asm_file, "  not\n");
             break;
           case BOOL_AND:
             fprintf(asm_file, "  and\n");
@@ -670,7 +682,7 @@ class Tree {
       {
         fprintf(asm_file, "\n:func_main\n");
         for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-          printAsmRec(node->sons[son_id], asm_file, 0);
+          printAsmRec(node->sons[son_id], asm_file, func_blocks_.size() - 1);
         }
         fprintf(asm_file, "  end\n");
         break;
