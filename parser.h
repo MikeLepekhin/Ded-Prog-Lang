@@ -171,6 +171,16 @@ class Parser {
     }
     if (func_node == nullptr) {
       func_node = getFuncHeader(false);
+      if (func_node == nullptr) {
+        return nullptr;
+      }
+      Node* call_node = allocator_.init_alloc(Node{STANDART_FUNCTION, CALL, {func_node}});
+
+      for (size_t param_id = 0; param_id < func_node->sons.size(); ++param_id) {
+        call_node->sons.push_back(func_node->sons[param_id]);
+      }
+      func_node->sons.clear();
+      return call_node;
     }
     return func_node;
   }
@@ -268,6 +278,7 @@ class Parser {
       tree_.initVariable(var_node->type == VARIABLE ? -1 : func_id, var_node->value, value_node);
 
       LOG("variable was processed");
+      var_node->type = VAR_INIT;
       return var_node;
     } catch (InterpreterException& exc) {
       throw exc;
@@ -468,9 +479,9 @@ class Parser {
       if (node == nullptr) {
         node = getFuncCall(func_id);
       }
-      if (node == nullptr) {
+      /*if (node == nullptr) {
         node = getE(func_id);
-      }
+      }*/
 
       if (node == nullptr) {
         return nullptr;
@@ -704,7 +715,9 @@ class Parser {
 
       Node* g_node = getG(func_node->value);
       while (g_node != nullptr) {
-        func_node->sons.push_back(g_node);
+        if (g_node->type != VAR_INIT) {
+          func_node->sons.push_back(g_node);
+        }
         g_node = getG(func_node->value);
       }
 
@@ -757,13 +770,15 @@ class Parser {
 
       Node* main_node = allocator_.init_alloc(Node(MAIN, 0.0));
 
-      tree_.addFunction("main", main_node);
+      int func_id = tree_.addFunction("main", main_node);
       main_node->sons.push_back(allocator_.init_alloc(Node{VAR_INIT, 0.0}));
 
-      Node* g_node = getG(0);
+      Node* g_node = getG(func_id);
       while (g_node != nullptr) {
-        main_node->sons.push_back(g_node);
-        g_node = getG(0);
+        if (g_node->type != VAR_INIT) {
+          main_node->sons.push_back(g_node);
+        }
+        g_node = getG(func_id);
       }
 
       if (!getStr("kek")) {
@@ -785,7 +800,6 @@ class Parser {
 
       tree_.getRoot()->sons[0] = allocator_.init_alloc(Node{VAR_INIT, 0});
       getVarInit(-1);
-      tree_.addFunction("main", nullptr);
       tree_.getRoot()->sons[1] = getFuncs();
       tree_.getRoot()->sons[2] = getMain();
 

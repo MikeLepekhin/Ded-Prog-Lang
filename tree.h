@@ -405,7 +405,12 @@ class Tree {
     }
     std::sort(funcs.begin(), funcs.end());
     for (const std::pair<size_t, std::string>& cp: funcs) {
-      fprintf(tree_file, "%s: PARAMS 0 NEWVAR %zu\n", cp.second.c_str(), func_blocks_[cp.first].var_shift.size());
+      //fprintf(tree_file, "func %zu\n", cp.first);
+      fprintf(tree_file, "%s:\nPARAMS %zu\n", cp.second.c_str(),
+              func_blocks_[cp.first].param_shift.size());
+      printFuncVars(tree_file, func_blocks_[cp.first].param_shift);
+
+      fprintf(tree_file, "NEWVAR %zu\n", func_blocks_[cp.first].var_shift.size());
       printFuncVars(tree_file, func_blocks_[cp.first].var_shift);
     }
   }
@@ -624,21 +629,37 @@ class Tree {
           case SQ_ROOT:
             fprintf(asm_file, "  sqrt\n");
             break;
-          case CALL:
+          case CALL: {
+            int call_func_id = static_cast<int>(node->sons[0]->value);
+            int param_cnt = getParamCnt(call_func_id);
+
+            if (param_cnt + 1 != node->sons.size()) {
+              throw IncorrectArgumentException(std::string("called function get ") +
+                std::to_string(param_cnt) + " params but not " +
+                std::to_string(node->sons[0]->sons.size()), __PRETTY_FUNCTION__);
+            }
+            for (size_t param_id = 1; param_id <= param_cnt; ++param_id) {
+              printAsmRec(node->sons[param_id], asm_file, func_id);
+            }
+
             fprintf(asm_file, "  push rcx\n");
             fprintf(asm_file, "  push %zu\n", func_blocks_[func_id].param_shift.size() +
-                                              func_blocks_[func_id].var_shift.size());
+              func_blocks_[func_id].var_shift.size());
             fprintf(asm_file, "  add\n");
             fprintf(asm_file, "  pop rcx\n");
+            for (int param_id = param_cnt - 1; param_id >= 0; --param_id) {
+              fprintf(asm_file, "  pop [rcx+%d]\n", param_id);
+            }
 
-            fprintf(asm_file, "  call func_%d\n", static_cast<int>(node->sons[0]->value));
+            fprintf(asm_file, "  call func_%d\n", call_func_id);
 
             fprintf(asm_file, "  push rcx\n");
             fprintf(asm_file, "  push %zu\n", func_blocks_[func_id].param_shift.size() +
-                                              func_blocks_[func_id].var_shift.size());
+              func_blocks_[func_id].var_shift.size());
             fprintf(asm_file, "  sub\n");
             fprintf(asm_file, "  pop rcx\n");
             break;
+          }
           default:
             throw IncorrectArgumentException(std::string("no such operator ") + std::to_string(node->value),
                                              __PRETTY_FUNCTION__);
@@ -647,7 +668,7 @@ class Tree {
       }
       case MAIN:
       {
-        fprintf(asm_file, "\n:func_0\n");
+        fprintf(asm_file, "\n:func_main\n");
         for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
           printAsmRec(node->sons[son_id], asm_file, 0);
         }
@@ -668,7 +689,7 @@ class Tree {
         if (node->sons.size() == 1) {
           printAsmRec(node->sons[0], asm_file, func_id);
         }
-        if (func_id != 0) {
+        if (func_id + 1 != func_map_.size()) {
           fprintf(asm_file, "  ret\n");
         } else {
           fprintf(asm_file, "  end\n");
@@ -678,7 +699,7 @@ class Tree {
       case ROOT:
       {
         printAsmRec(node->sons[0], asm_file, func_id);
-        fprintf(asm_file, "  jmp func_0\n");
+        fprintf(asm_file, "jmp func_main\n");
         printAsmRec(node->sons[1], asm_file, func_id);
         printAsmRec(node->sons[2], asm_file, func_id);
         break;
