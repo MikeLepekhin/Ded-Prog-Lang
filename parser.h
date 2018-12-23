@@ -176,7 +176,7 @@ class Parser {
       func_node = getSqrt(func_id);
     }
     if (func_node == nullptr) {
-      func_node = getFuncHeader(false);
+      func_node = getFuncHeader(func_id, false);
       if (func_node == nullptr) {
         return nullptr;
       }
@@ -673,7 +673,7 @@ class Parser {
     return allocator_.init_alloc(Node(PARAM, param_id));
   }
 
-  Node* getFuncHeader(bool add_func = false) {
+  Node* getFuncHeader(int cur_func, bool add_func = false) {
     Node* func_node = allocator_.init_alloc(Node{USER_FUNCTION, 0});
     std::pair<std::string, int> func_id = getFuncName(add_func, func_node);
 
@@ -690,18 +690,25 @@ class Parser {
       Node* param_node = getParam(func_id.second, add_func);
 
       while (param_node != nullptr) {
+        if (!getStr(",")) {
+          break;
+        }
         param_node = getParam(func_id.second, add_func);
       }
     } else {
-      Node* e_node = getE(func_id.second);
+      Node* e_node = getE(cur_func);
 
       while (e_node != nullptr) {
         func_node->sons.push_back(e_node);
-        e_node = getE(func_id.second);
+        if (!getStr(",")) {
+          break;
+        }
+        e_node = getE(cur_func);
       }
     }
 
     if (!getStr(")")) {
+      LOG(std::to_string(token_ptr_));
       throw IncorrectParsingException(") was expected after (", __PRETTY_FUNCTION__);
     }
     return func_node;
@@ -714,7 +721,7 @@ class Parser {
       }
 
       LOG(std::string("getFunc ") + std::to_string(token_ptr_));
-      Node* func_node = getFuncHeader(true);
+      Node* func_node = getFuncHeader(-1, true);
 
       if (func_node == nullptr) {
         throw IncorrectParsingException("function name was expected after func", __PRETTY_FUNCTION__);

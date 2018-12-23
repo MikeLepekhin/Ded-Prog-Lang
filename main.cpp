@@ -80,12 +80,20 @@ void complile(int argc, char* argv[]) {
   myInterpreter(argv[2], binary_filename.c_str());
 }
 
-void visualize(const std::string tree_filename) {
+void visualize(const std::string& tree_filename) {
   SmartFile parse_tree_file(tree_filename.c_str(), "r");
   Visualizer visualizer(parse_tree_file.getFile());
 
   visualizer.makeTree();
-  visualizer.show("prog_tree.gv", "code.lolpp");
+  visualizer.show("prog_tree.gv");
+}
+
+void translate(const std::string& tree_filename) {
+  SmartFile parse_tree_file(tree_filename.c_str(), "r");
+  Visualizer visualizer(parse_tree_file.getFile());
+
+  visualizer.makeTree();
+  visualizer.translate("code.lolpp");
 }
 
 int main(int argc, char* argv[]) {
@@ -96,6 +104,7 @@ int main(int argc, char* argv[]) {
     complile(argc, argv);
     std::string tree_filename = std::string(argv[1]) + "_tree";
     visualize(tree_filename);
+    translate(tree_filename);
   } catch (InterpreterException& exc) {
     std::cerr << exc;
   }

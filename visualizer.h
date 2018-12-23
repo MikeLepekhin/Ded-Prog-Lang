@@ -182,50 +182,50 @@ class Visualizer {
         throw VisualizerException("where is FUNCS?", __PRETTY_FUNCTION__);
       }
       size_t func_cnt = atoi(parseInt().c_str());
-     // //std::cerr << "func_cnt " << func_cnt << '\n';
+     // std::cerr << "func_cnt " << func_cnt << '\n';
 
       for (size_t func_id = 0; func_id < func_cnt; ++func_id) {
         std::string func_name = parseName();
         if (func_name.empty()) {
           throw VisualizerException("function name is empty", __PRETTY_FUNCTION__);
         }
-        //std::cerr << "function " << func_name << '\n';
+        std::cerr << "function " << func_name << '\n';
 
         func_name.erase(func_name.size() - 1, 1);
         funcs_.push_back(func_name);
         func_blocks_.push_back(VisFuncBlock());
 
         if (!parseString("PARAMS")) {
-          //std::cerr << *buf_ptr_ << '\n';
+          std::cerr << *buf_ptr_ << '\n';
           throw VisualizerException("where is PARAMS?", __PRETTY_FUNCTION__);
         }
         size_t param_cnt = atoi(parseInt().c_str());
-        //std::cerr << "param cnt " << param_cnt << '\n';
+        std::cerr << "param cnt " << param_cnt << '\n';
         for (size_t param_id = 0; param_id < param_cnt; ++param_id) {
           std::string param_name = parseName();
 
           func_blocks_[func_id].params.push_back(param_name);
-          //std::cerr << "param " << param_name << '\n';
+          std::cerr << "param " << param_name << '\n';
         }
 
         if (!parseString("NEWVAR")) {
-          //std::cerr << *buf_ptr_ << '\n';
+          std::cerr << *buf_ptr_ << '\n';
           throw VisualizerException("where is NEWVAR?", __PRETTY_FUNCTION__);
         }
         size_t var_cnt = atoi(parseInt().c_str());
-        //std::cerr << "var cnt " << var_cnt << '\n';
+        std::cerr << "var cnt " << var_cnt << '\n';
         for (size_t var_id = 0; var_id < var_cnt; ++var_id) {
           std::string param_name = parseName();
 
           func_blocks_[func_id].variables.push_back(param_name);
-          //std::cerr << "var " << param_name << '\n';
+          std::cerr << "var " << param_name << '\n';
         }
 
       }
       tree_.setRoot(parseNode());
       //std::cout << "root was parsed\n";
     } catch (VisualizerException& exc) {
-      //std::cerr << exc;
+      std::cerr << exc;
     }
   }
 
@@ -235,8 +235,8 @@ class Visualizer {
     double value = node->value;
     int int_value = static_cast<int>(node->value);
 
-    //std::cerr << node->type << ' ' << node->value << '\n';
-    //std::cerr << func_id << '\n';
+    std::cerr << node->type << ' ' << node->value << '\n';
+    std::cerr << func_id << '\n';
 
     switch (node->type) {
       case ROOT:
@@ -403,8 +403,11 @@ class Visualizer {
     if (node->type == STANDART_FUNCTION && node->value == CALL) {
       int cur_func_id = node->sons[0]->value;
 
-      for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-        size_t son_num = showRec(node->sons[son_id], file, cur_func_id);
+      size_t first_son_num = showRec(node->sons[0], file, cur_func_id);
+      fprintf(file, "  node%zu->node%zu;\n", cur_num, first_son_num);
+
+      for (size_t son_id = 1; son_id < node->sons.size(); ++son_id) {
+        size_t son_num = showRec(node->sons[son_id], file, func_id);
 
         fprintf(file, "  node%zu->node%zu;\n", cur_num, son_num);
       }
@@ -418,13 +421,24 @@ class Visualizer {
     return cur_num;
   }
 
-  void translateRec(Node* node, FILE* file, int func_id) {
+  void printLevel(int level, FILE* file) {
+    for (size_t tab_id = 0; tab_id < level; ++tab_id) {
+      fprintf(file, "  ");
+    }
+  }
+
+  bool isAssign(int lang_oper) const {
+    return lang_oper == EQUAL || lang_oper == PLUS_EQUAL || lang_oper == MINUS_EQUAL
+        || lang_oper == MULTIPLY_EQUAL || lang_oper == DIVIDE_EQUAL;
+  }
+
+  void translateRec(Node* node, FILE* file, int func_id, int level) {
     size_t cur_num = node_cnt_++;
     double value = node->value;
     int int_value = static_cast<int>(node->value);
 
-    //std::cerr << "translate " << node->type << ' ' << node->value << '\n';
-    //std::cerr << "translate " << func_id << '\n';
+    std::cerr << "translate " << node->type << ' ' << node->value << '\n';
+    std::cerr << "translate " << func_id << '\n';
 
     switch (node->type) {
       case ROOT:
@@ -433,15 +447,19 @@ class Visualizer {
         break;
       case USER_FUNCTION:
         fprintf(file, "func %s(", funcs_[int_value].c_str());
+        func_id = int_value;
         for (size_t param_id = 0; param_id < func_blocks_[int_value].params.size(); ++param_id) {
-          fprintf(file, "%s", funcs_[int_value].c_str());
+          fprintf(file, "%s", func_blocks_[int_value].params[param_id].c_str());
           if (param_id + 1 != func_blocks_[int_value].params.size()) {
             fprintf(file, ", ");
           }
         }
-        fprintf(file, ")\nlol\n");
-
-        fprintf(file, "\nkek\n");
+        fprintf(file, ")\n");
+        fprintf(file, "lol\n");
+        for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+          translateRec(node->sons[son_id], file, func_id, level + 1);
+        }
+        fprintf(file, "kek\n\n");
         return;
       case NUMBER:
         if (value != int_value) {
@@ -464,42 +482,55 @@ class Visualizer {
       {
         int operator_type = static_cast<int>(node->value);
 
+        if (isAssign(operator_type)) {
+          printLevel(level, file);
+          translateRec(node->sons[0], file, func_id, level);
+        } else if (node->sons.size() == 2) {
+          fprintf(file, "(");
+          translateRec(node->sons[0], file, func_id, level);
+          fprintf(file, ")");
+        }
+
         switch (operator_type) {
           case EQUAL:
-            fprintf(file, "=");
+            fprintf(file, " = ");
             break;
           case PLUS:
-            fprintf(file, "+");
+            fprintf(file, " + ");
             break;
           case MINUS:
-            fprintf(file, "-");
+            if (node->sons.size() == 2) {
+              fprintf(file, " - ");
+            } else {
+              fprintf(file, "-");
+            }
             break;
           case MULTIPLY:
-            fprintf(file, "*");
+            fprintf(file, " * ");
             break;
           case DIVIDE:
-            fprintf(file, "/");
+            fprintf(file, " / ");
             break;
           case POWER:
-            fprintf(file, "^");
+            fprintf(file, " ^ ");
             break;
           case BOOL_EQUAL:
-            fprintf(file, "==");
+            fprintf(file, " == ");
             break;
           case BOOL_NOT_EQUAL:
-            fprintf(file, "!=");
+            fprintf(file, " != ");
             break;
           case BOOL_LOWER:
-            fprintf(file, "<");
+            fprintf(file, " < ");
             break;
           case BOOL_GREATER:
-            fprintf(file, ">");
+            fprintf(file, " > ");
             break;
           case BOOL_NOT_LOWER:
-            fprintf(file, ">=");
+            fprintf(file, " >= ");
             break;
           case BOOL_NOT_GREATER:
-            fprintf(file, "<=");
+            fprintf(file, " <= ");
             break;
           case BOOL_NOT:
             fprintf(file, "!");
@@ -523,7 +554,15 @@ class Visualizer {
             fprintf(file, " /= ");
             break;
         }
-        break;
+        if (node->sons.size() == 2) {
+          translateRec(node->sons[1], file, func_id, level);
+        } else {
+          translateRec(node->sons[0], file, func_id, level);
+        }
+        if (isAssign(operator_type)) {
+          fprintf(file, ";\n");
+        }
+        return;
       }
       case LOGIC:
       {
@@ -531,58 +570,129 @@ class Visualizer {
 
         switch (logic_type) {
           case IF:
-            fprintf(file, "if");
-            break;
+            printLevel(level, file);
+            fprintf(file, "if (");
+            translateRec(node->sons[0], file, func_id, level);
+            fprintf(file, ")\n");
+            printLevel(level, file);
+            fprintf(file, "lol\n");
+            translateRec(node->sons[1], file, func_id, level + 1);
+            printLevel(level, file);
+            fprintf(file, "kek\n\n");
+            return;
           case ELSE:
-            fprintf(file, "else");
-            break;
+            printLevel(level, file);
+            fprintf(file, "else\n");
+            printLevel(level, file);
+            fprintf(file, "lol\n");
+            translateRec(node->sons[1], file, func_id, level + 1);
+            printLevel(level, file);
+            fprintf(file, "kek\n\n");
+            return;
           case WHILE:
-            fprintf(file, "while");
-            break;
+            printLevel(level, file);
+            fprintf(file, "while (");
+            translateRec(node->sons[0], file, func_id, level);
+            fprintf(file, ")\n");
+            printLevel(level, file);
+            fprintf(file, "lol\n");
+            translateRec(node->sons[1], file, func_id, level + 1);
+            printLevel(level, file);
+            fprintf(file, "kek\n\n");
+            return;
           case CONDITION:
-            fprintf(file, "condition");
-            break;
+            translateRec(node->sons[0], file, func_id, level);
+            return;
           case CONDITION_MET:
-            fprintf(file, "condition_met");
-            break;
+            for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+              translateRec(node->sons[son_id], file, func_id, level);
+            }
+            return;
         }
-        break;
+       return;
       }
       case MAIN:
         func_id = funcs_.size() - 1;
-        fprintf(file, "main");
-        break;
+        fprintf(file, "main()");
+        fprintf(file, "\nlol\n");
+        for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+          translateRec(node->sons[son_id], file, func_id, level + 1);
+        }
+        fprintf(file, "\nkek\n");
+        return;
       case STANDART_FUNCTION:
       {
         int func_type = static_cast<int>(node->value);
 
         switch (func_type) {
           case INPUT:
-            fprintf(file, "input");
+            printLevel(level, file);
+            fprintf(file, "scan(");
             break;
           case OUTPUT:
-            fprintf(file, "output");
+            printLevel(level, file);
+            fprintf(file, "print(");
             break;
           case SIN:
-            fprintf(file, "sin");
+            fprintf(file, "sin(");
             break;
-          case COS:fprintf(file, "cos");
+          case COS:
+            fprintf(file, "cos(");
             break;
-          case CALL: {
-            fprintf(file, "call");
+          case SQ_ROOT:
+            fprintf(file, "sqrt(");
             break;
+          case CALL:
+          {
+            int cur_func_id = node->sons[0]->value;
+            std::cerr << "call function " << cur_func_id << '\n';
+
+            fprintf(file, "%s(", funcs_[cur_func_id].c_str());
+            //func_id = int_value;
+            for (size_t param_id = 1; param_id < node->sons.size(); ++param_id) {
+              translateRec(node->sons[param_id], file, func_id, level);
+              if (param_id + 1 != node->sons.size()) {
+                fprintf(file, ", ");
+              }
+            }
+            fprintf(file, ")");
+
+            return;
           }
-          case SQ_ROOT:fprintf(file, "sqrt");
-            break;
         }
-        break;
+        translateRec(node->sons[0], file, func_id, level);
+        fprintf(file, ")");
+        if (func_type == INPUT || func_type == OUTPUT) {
+          fprintf(file, ";\n");
+        }
+        return;
       }
       case VAR_INIT:
-        fprintf(file, "var_init");
-        break;
+        if (func_id == -1) {
+          for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+            printLevel(level, file);
+            fprintf(file, "float %s = ", variables_[son_id].c_str());
+            translateRec(node->sons[son_id], file, func_id, level);
+            fprintf(file, ";\n");
+          }
+        } else {
+          printLevel(level, file);
+          for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
+            fprintf(file, "float %s = ", func_blocks_[func_id].variables[son_id].c_str());
+            translateRec(node->sons[son_id], file, func_id, level);
+            fprintf(file, ";\n");
+          }
+        }
+        return;
       case RETURN:
+        printLevel(level, file);
         fprintf(file, "return");
-        break;
+        if (node->sons.size() == 1) {
+          fprintf(file, " ");
+          translateRec(node->sons[0], file, func_id, level);
+        }
+        fprintf(file, ";\n");
+        return;
       case PARAM:
         fprintf(file, "%s", func_blocks_[func_id].params[int_value].c_str());
         break;
@@ -590,27 +700,15 @@ class Visualizer {
       default:
         break;
     }
-    fprintf(file, "%c];", static_cast<char>(34));
-
-    if (node->type == STANDART_FUNCTION && node->value == CALL) {
-      for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-        //translateRec(node->sons[son_id], file, cur_func_id);
-
-      }
-      return;
-    }
     for (size_t son_id = 0; son_id < node->sons.size(); ++son_id) {
-      translateRec(node->sons[son_id], file, func_id);
-
+      translateRec(node->sons[son_id], file, func_id, level);
     }
     return;
   }
 
-  void show(const std::string& tree_filename, const std::string& code_filename) {
+  void show(const std::string& tree_filename) {
     SmartFile tree_file(tree_filename.c_str(), "w");
-    SmartFile smart_code_file(code_filename.c_str(), "w");
     FILE* file = tree_file.getFile();
-    FILE* code_file = smart_code_file.getFile();
 
     fprintf(file, "digraph G {\n");
     fprintf(file, "  node [style=filled];\n");
@@ -618,12 +716,14 @@ class Visualizer {
     fprintf(file, "}");
     tree_file.release();
 
-    translateRec(tree_.getRoot(), code_file, -1);
-
     std::string command_text = "xdot " + tree_filename;
-    //std::cout << command_text << '\n';
-
     system(command_text.c_str());
+  }
+
+  void translate(const std::string& code_filename) {
+    SmartFile smart_code_file(code_filename.c_str(), "w");
+    FILE* code_file = smart_code_file.getFile();
+    translateRec(tree_.getRoot(), code_file, -1, 0);
   }
 };
 
